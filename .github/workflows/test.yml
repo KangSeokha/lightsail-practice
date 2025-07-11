@@ -19,5 +19,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y redis-server
           redis-server --daemonize yes --requirepass test_env --port 6380
+          # Wait for Redis to be ready
+          sleep 3
+          # Test Redis connection
+          redis-cli -p 6380 -a test_env ping
+      - name: Build TypeScript
+        run: npm run build
       - name: Run test
         run: npm run test:ci
