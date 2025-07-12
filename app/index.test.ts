@@ -8,18 +8,28 @@ let client: RedisClient;
 const REDIS_URL = 'redis://default:test_env@localhost:6380';
 
 beforeAll(async () => {
-  client = redis.createClient({ url: REDIS_URL, legacyMode: true });
+  client = redis.createClient({ url: REDIS_URL });
+
+  // Add error handler to prevent unhandled errors
+  client.on('error', (err) => {
+    console.error('Redis Client Error:', err);
+  });
+
   await client.connect();
   app = createApp(client);
 });
 
 beforeEach(async () => {
-  await client.flushDb();
+  if (client && client.isOpen) {
+    await client.flushDb();
+  }
 });
 
 afterAll(async () => {
-  await client.flushDb();
-  await client.quit();
+  if (client && client.isOpen) {
+    await client.flushDb();
+    await client.quit();
+  }
 });
 
 describe('POST /messages', () => {
