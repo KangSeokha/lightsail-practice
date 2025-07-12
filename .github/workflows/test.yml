@@ -18,12 +18,48 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y redis-server
-          redis-server --daemonize yes --requirepass test_env --port 6380
-          # Wait for Redis to be ready
-          sleep 3
-          # Test Redis connection
+
+          # Stop the default Redis service
+          sudo systemctl stop redis-server
+          sudo systemctl disable redis-server
+
+          # Create a custom Redis configuration file
+          cat > /tmp/redis-test.conf << EOF
+          port 6380
+          requirepass test_env
+          daemonize yes
+          pidfile /tmp/redis-test.pid
+          logfile /tmp/redis-test.log
+          dir /tmp
+          EOF
+
+          # Start Redis with custom configuration
+          redis-server /tmp/redis-test.conf
+
+          # Wait for Redis to be ready with retry logic
+          for i in {1..30}; do
+            if redis-cli -p 6380 -a test_env ping 2>/dev/null; then
+              echo "Redis is ready!"
+              break
+            fi
+            echo "Waiting for Redis... (attempt $i/30)"
+            sleep 1
+          done
+
+          # Final test
           redis-cli -p 6380 -a test_env ping
       - name: Build TypeScript
-        run: npm run build
+        run: |
+          # Clean any previous build artifacts
+          rm -rf build/
+          npm run build
       - name: Run test
         run: npm run test:ci
+        env:
+          REDIS_URL: redis://default:test_env@localhost:6380
+      - name: Stop Redis
+        run: |
+          if [ -f /tmp/redis-test.pid ]; then
+            redis-cli -p 6380 -a test_env shutdown || true
+            rm -f /tmp/redis-test.pid
+          fi
