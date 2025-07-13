@@ -9,7 +9,7 @@ if (!PORT) throw new Error('PORT is required');
 if (!REDIS_URL) throw new Error('REDIS_URL is required');
 
 const startServer = async () => {
-  const client = redis.createClient({ url: REDIS_URL, legacyMode: true });
+  const client = redis.createClient({ url: REDIS_URL });
   await client.connect();
 
   const app = createApp(client);
