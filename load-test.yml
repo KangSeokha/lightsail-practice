@@ -1,0 +1,12 @@
+config:
+  # target: http://localhost:4000
+  target: https://pricevoyager.net
+  phases:
+    - duration: 5
+      arrivalRate: 30
+
+scenarios:
+  - name: default
+    flow:
+      - get:
+          url: '/fibonacci/10'
