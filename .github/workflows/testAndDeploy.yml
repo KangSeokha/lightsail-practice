@@ -1,0 +1,105 @@
+name: testAndDeploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Node.js setup
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: Install npm packages
+        run: npm ci
+      - name: Install and run redis-server
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+
+          # Stop the default Redis service
+          sudo systemctl stop redis-server
+          sudo systemctl disable redis-server
+
+          # Create a custom Redis configuration file
+          cat > /tmp/redis-test.conf << EOF
+          port 6380
+          requirepass test_env
+          daemonize yes
+          pidfile /tmp/redis-test.pid
+          logfile /tmp/redis-test.log
+          dir /tmp
+          EOF
+
+          # Start Redis with custom configuration
+          redis-server /tmp/redis-test.conf
+
+          # Wait for Redis to be ready with retry logic
+          for i in {1..30}; do
+            if redis-cli -p 6380 -a test_env ping 2>/dev/null; then
+              echo "Redis is ready!"
+              break
+            fi
+            echo "Waiting for Redis... (attempt $i/30)"
+            sleep 1
+          done
+
+          # Final test
+          redis-cli -p 6380 -a test_env ping
+      - name: Build TypeScript
+        run: |
+          # Clean any previous build artifacts
+          rm -rf build/
+          npm run build
+      - name: Run test
+        run: npm run test:ci
+        env:
+          REDIS_URL: redis://default:test_env@localhost:6380
+      - name: Stop Redis
+        run: |
+          if [ -f /tmp/redis-test.pid ]; then
+            redis-cli -p 6380 -a test_env shutdown || true
+            rm -f /tmp/redis-test.pid
+          fi
+
+  deploy:
+    runs-on: ubuntu-22.04
+    needs: test
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{secrets.SSH_PRIVATE_KEY}}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+      - name: Set up known hosts
+        run: |
+          echo "${{secrets.SSH_KNOWN_HOSTS}}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+      - name: SSH and deploy
+        run: |
+          ssh ${{secrets.SSH_USERNAME}}@${{secrets.SSH_PUBLIC_IP}} "
+            echo 'Changing directory...'
+            cd lightsail-practice  || { echo 'Directory lightsail-practice not found'; exit 1; }
+            echo 'Resetting local changes...'
+            git reset --hard HEAD || exit 1
+            echo 'Pulling latest code with automatic conflict resolution...'
+            git pull -X ours origin dev || exit 1  # Automatically resolve conflicts by favoring local changes
+            echo 'Installing npm dependencies...'
+            npm install || exit 1
+            echo 'Building project...'
+            npm run build || exit 1
+            echo 'Stopping existing node processes...'
+            sudo pkill node
+            echo 'Starting the application...'
+            sudo npm run start > server.log 2>&1 &  # Run server in background but keep session open
+            echo 'Waiting for the server to start...'
+            npx wait-on http://localhost || { echo 'Server did not start'; exit 1; }
+            echo 'Server is up and running!'
+            echo 'Exiting...'
+            exit
+          "
